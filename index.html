@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>스위치법 트래커 v3.6 (2026-06-11)</title>
+<title>스위치법 트래커 v3.7 (2026-06-11)</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
 :root {
@@ -126,7 +126,7 @@ input:focus{border-color:var(--accent)}
   <div class="hdr">
     <div class="hdr-row">
       <span class="home-title">SWITCH</span>
-      <span class="ver">v3.6</span>
+      <span class="ver">v3.7</span>
     </div>
   </div>
   <div class="pg on">
@@ -196,19 +196,6 @@ input:focus{border-color:var(--accent)}
 
   <!-- 거래기록 -->
   <div class="pg" id="pg-trades">
-
-    <div class="sec">⚡ 종가 자동 체결</div>
-    <div class="card" style="border-color:#2a4a6a">
-      <div style="font-size:11px;color:var(--text2);line-height:1.6;margin-bottom:10px">
-        오늘 미국 장 종가를 입력하면 어젯밤 주문 기준으로 업다운·떨법 매수/매도가 자동 기록돼요.
-      </div>
-      <div class="g2" style="margin-bottom:8px">
-        <div><span class="lbl">미국 장 날짜</span><input type="text" id="ac-date" placeholder="6/10"></div>
-        <div><span class="lbl">오늘 종가 ($)</span><input type="number" id="ac-close" step=".01" placeholder="211.44"></div>
-      </div>
-      <button class="btn-new" style="background:#1a3a5a;color:#6bb5ff;border:1px solid #2a4a6a" onclick="autoFill()">종가로 자동 체결</button>
-      <div id="ac-preview"></div>
-    </div>
 
     <div class="stabs">
       <button class="stab on" onclick="goStab('ud',this)">업다운법</button>
@@ -346,7 +333,6 @@ function openTicker(id){
   // 매수매도표 탭으로
   goTab('table',document.querySelectorAll('#screen-ticker .tab')[0]);
   buildTbl();
-  document.getElementById('ac-date').value=today();
   renderTrades('ud');renderTrades('dd');
   window.scrollTo(0,0);
 }
@@ -541,102 +527,6 @@ function buildTbl(){
 }
 
 // ── 거래 ──
-
-// 종가 자동 체결: 오늘 종가로 어젯밤 LP 주문표 기준 매수/매도 자동 판정
-function autoFill(){
-  const t=cur();if(!t)return alert('종목을 선택해주세요');
-  const dateEl=document.getElementById('ac-date');
-  const closeEl=document.getElementById('ac-close');
-  const close=parseFloat(closeEl.value);
-  const date=dateEl.value.trim()||today();
-  if(!close||isNaN(close)){alert('오늘 종가를 입력해주세요');return;}
-  // 어젯밤 주문 기준 LP = 저장된 LP (밤에 주문 걸 때 입력한 직전 종가)
-  const lp=t.lp;
-  if(!lp){alert('먼저 매수매도표 탭에서 직전 종가(LP)를 입력해야 해요.\n(어젯밤 주문 걸 때 본 그 종가)');return;}
-
-  const unit=Math.round(t.seed/t.div);
-  const div=t.div;
-
-  // 현재 보유 상태 계산
-  let udHeld=0,udPot=0;
-  (t.ud||[]).forEach(x=>{if(x.type==='매수'){udHeld+=x.qty;udPot++;}else{udHeld=Math.max(0,udHeld-x.qty);udPot=Math.max(0,udPot-1);if(udHeld<=0)udPot=0;}});
-  let ddLots=[];
-  (t.dd||[]).forEach(x=>{
-    if(x.type==='매수')ddLots.push({price:x.price,qty:x.qty});
-    else{let rem=x.qty;ddLots.sort((a,b)=>a.price-b.price);for(const l of ddLots){if(rem<=0)break;const m=Math.min(l.qty,rem);l.qty-=m;rem-=m;}ddLots=ddLots.filter(l=>l.qty>0);}
-  });
-
-  const actions=[]; // {track,type,price,qty,label}
-
-  // ── 업다운 판정 ──
-  // 매도 우선: 종가 > LP 이면 보유분 매도 (수량=보유÷Pot 내림)
-  if(udHeld>0 && close>lp){
-    const sellQty=udPot>0?Math.floor(udHeld/udPot):udHeld;
-    if(sellQty>0){
-      // 평단 계산
-      let a=0,q=0;(t.ud||[]).forEach(x=>{if(x.type==='매수'){const nq=q+x.qty;a=(a*q+x.price*x.qty)/nq;q=nq;}else q=Math.max(0,q-x.qty);});
-      actions.push({track:'ud',type:'매도',price:close,qty:sellQty,label:close>=a?'익절':'손절'});
-    }
-  } else {
-    // 매수: 종가 ≤ 매수가인 줄 전부 (LOC는 종가단일가 체결)
-    // 1번 매수가 하락폭 = P+R 기준
-    const ddRankNow=new Set(ddLots.map(l=>l.price.toFixed(2))).size;
-    const udRows=makeTable(lp,unit,div,true,udPot+ddRankNow);
-    udRows.forEach(r=>{
-      if(close<=r.price){
-        actions.push({track:'ud',type:'매수',price:close,qty:r.qty,label:'매수'});
-      }
-    });
-  }
-
-  // ── 떨법 판정 ──
-  // 매도: 보유 회차 중 매수가 ≤ 종가인 것 전량 매도 (산 가격 위로 오르면 매도)
-  const ddSellLots=ddLots.filter(l=>l.price<=close);
-  let ddSellQty=ddSellLots.reduce((s,l)=>s+l.qty,0);
-  if(ddSellQty>0){
-    actions.push({track:'dd',type:'매도',price:close,qty:ddSellQty,label:'익절'});
-  }
-  // 매수: 종가 ≤ 떨법 매수가인 줄 (이미 그 가격대 보유 중이면 중복 안함)
-  const ddRows=makeTable(lp,unit,div,false,0);
-  const heldPrices=new Set(ddLots.map(l=>l.price.toFixed(2)));
-  ddRows.forEach(r=>{
-    if(close<=r.price && !heldPrices.has(r.price.toFixed(2))){
-      actions.push({track:'dd',type:'매수',price:close,qty:r.qty,label:'매수'});
-    }
-  });
-
-  // 미리보기 표시
-  const pv=document.getElementById('ac-preview');
-  if(!actions.length){
-    pv.innerHTML=`<div style="margin-top:10px;padding:10px;background:var(--bg3);border-radius:8px;font-size:12px;color:var(--text2)">종가 $${close.toFixed(2)} 기준 체결될 주문이 없어요.<br>(LP $${lp.toFixed(2)} 기준)</div>`;
-    return;
-  }
-  let html=`<div style="margin-top:12px;padding:12px;background:var(--bg3);border-radius:8px">
-    <div style="font-size:11px;color:var(--text2);margin-bottom:8px">종가 $${close.toFixed(2)} · ${date} 체결 내역 (LP $${lp.toFixed(2)} 기준)</div>`;
-  actions.forEach(a=>{
-    const c=a.type==='매수'?'#4fffb0':a.label==='손절'?'#ffaa44':'#6bb5ff';
-    html+=`<div style="display:flex;justify-content:space-between;padding:5px 0;font-family:var(--mono);font-size:12px">
-      <span style="color:var(--text2)">${a.track==='ud'?'업다운':'떨법'}</span>
-      <span style="color:${c}">${a.label} $${a.price.toFixed(2)} × ${a.qty}주</span>
-    </div>`;
-  });
-  html+=`<button class="btn-new" style="margin-top:10px" onclick='confirmAutoFill(${JSON.stringify(actions).replace(/'/g,"&#39;")}, "${date}")'>이대로 기록</button>
-    <button class="btn-new" style="background:var(--bg2);border:1px solid var(--border);color:var(--text2);margin-top:6px" onclick="document.getElementById('ac-preview').innerHTML=''">취소</button>
-    </div>`;
-  pv.innerHTML=html;
-}
-
-function confirmAutoFill(actions,date){
-  const t=cur();if(!t)return;
-  actions.forEach(a=>{
-    t[a.track].push({id:Date.now()+Math.random(),date,type:a.label,price:a.price,qty:a.qty});
-  });
-  save();
-  document.getElementById('ac-preview').innerHTML=`<div style="margin-top:10px;padding:10px;background:#0a2a1a;border:1px solid #1a4a2a;border-radius:8px;font-size:12px;color:var(--accent)">✓ ${actions.length}건 기록 완료</div>`;
-  document.getElementById('ac-close').value='';
-  renderTrades('ud');renderTrades('dd');renderSettings();
-  setTimeout(()=>{document.getElementById('ac-preview').innerHTML='';},2500);
-}
 
 function addTrade(track,type){
   const t=cur();if(!t)return;
