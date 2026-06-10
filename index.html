@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>스위치법 트래커 v3.5 (2026-06-10)</title>
+<title>스위치법 트래커 v3.6 (2026-06-11)</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
 :root {
@@ -126,7 +126,7 @@ input:focus{border-color:var(--accent)}
   <div class="hdr">
     <div class="hdr-row">
       <span class="home-title">SWITCH</span>
-      <span class="ver">v3.5</span>
+      <span class="ver">v3.6</span>
     </div>
   </div>
   <div class="pg on">
@@ -464,8 +464,7 @@ function buildTbl(){
   // LP를 오늘 날짜와 함께 저장 (같은 날 재방문 시 자동 복원)
   if(t){t.lp=lp;t.lpDate=today();save();}
 
-  // ── 업다운 ──
-  // 보유 수량 + Pot(매수 횟수) 계산
+  // ── 업다운 Pot/보유 계산 (테이블은 P+R 구한 뒤 생성) ──
   let udHeld=0, udPot=0;
   (t&&t.ud?t.ud:[]).forEach(x=>{
     if(x.type==='매수'){udHeld+=x.qty;udPot++;}
@@ -473,16 +472,6 @@ function buildTbl(){
   });
   // 매도 수량 = 보유 ÷ Pot 내림 (라오어 E19 공식)
   const udSellQty=udPot>0?Math.floor(udHeld/udPot):0;
-
-  const udRows=makeTable(lp,unit,div,true,udPot);
-  const udBody=document.getElementById('ud-body');udBody.innerHTML='';
-  udRows.forEach((r,i)=>{
-    const sellP=i===0&&udHeld>0?`$${lp.toFixed(2)}`:'';
-    const sellQ=i===0&&udSellQty>0?`${udSellQty}`:'';
-    const d=document.createElement('div');d.className='rao-row';
-    d.innerHTML=`<span class="rao-buy${r.top?' top':''}">$${r.price.toFixed(2)}</span><span class="rao-bq">${r.qty}</span><span class="rao-sell">${sellP}</span><span class="rao-sq">${sellQ}</span>`;
-    udBody.appendChild(d);
-  });
 
   // ── 떨법 ── (각 회차: 산 가격 이상이면 매도. 매도가 = 그 회차 매수가)
   const ddRows=makeTable(lp,unit,div,false,0);
@@ -509,6 +498,19 @@ function buildTbl(){
   });
   // 떨법 Rank = 현재 보유 중인 회차(매수가 종류) 수
   const ddRank=Object.keys(ddHoldByPrice).length;
+
+  // ── 업다운 테이블 생성 (1번 매수가 하락폭 = P+R 기준) ──
+  const PR=udPot+ddRank;
+  const udRows=makeTable(lp,unit,div,true,PR);
+  const udBody=document.getElementById('ud-body');udBody.innerHTML='';
+  udRows.forEach((r,i)=>{
+    const sellP=i===0&&udHeld>0?`$${lp.toFixed(2)}`:'';
+    const sellQ=i===0&&udSellQty>0?`${udSellQty}`:'';
+    const d=document.createElement('div');d.className='rao-row';
+    d.innerHTML=`<span class="rao-buy${r.top?' top':''}">$${r.price.toFixed(2)}</span><span class="rao-bq">${r.qty}</span><span class="rao-sell">${sellP}</span><span class="rao-sq">${sellQ}</span>`;
+    udBody.appendChild(d);
+  });
+
   const ddBodyEl=document.getElementById('dd-body');ddBodyEl.innerHTML='';
   // 1) 현재 테이블 매수가에 없는 보유 회차 먼저 표시 (과거에 더 비싸게 산 것들)
   const tablePrices=new Set(ddRows.map(r=>r.price.toFixed(2)));
@@ -577,7 +579,9 @@ function autoFill(){
     }
   } else {
     // 매수: 종가 ≤ 매수가인 줄 전부 (LOC는 종가단일가 체결)
-    const udRows=makeTable(lp,unit,div,true,udPot);
+    // 1번 매수가 하락폭 = P+R 기준
+    const ddRankNow=new Set(ddLots.map(l=>l.price.toFixed(2))).size;
+    const udRows=makeTable(lp,unit,div,true,udPot+ddRankNow);
     udRows.forEach(r=>{
       if(close<=r.price){
         actions.push({track:'ud',type:'매수',price:close,qty:r.qty,label:'매수'});
