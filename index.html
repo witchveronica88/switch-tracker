@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>스위치법 트래커 v3.7 (2026-06-11)</title>
+<title>스위치법 트래커 v3.8 (2026-06-22)</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
 :root {
@@ -126,7 +126,7 @@ input:focus{border-color:var(--accent)}
   <div class="hdr">
     <div class="hdr-row">
       <span class="home-title">SWITCH</span>
-      <span class="ver">v3.7</span>
+      <span class="ver">v3.8</span>
     </div>
   </div>
   <div class="pg on">
@@ -265,6 +265,14 @@ input:focus{border-color:var(--accent)}
       <div class="met"><div class="met-lbl">투입 시드</div><div class="met-val" id="cfg-used">—</div></div>
       <div class="met"><div class="met-lbl">전체 수익</div><div class="met-val" id="cfg-profit">—</div></div>
     </div>
+    <div class="sec">사이클 관리</div>
+    <div class="card">
+      <div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:12px">
+        전량 매도로 사이클이 끝났으면, 새 사이클을 시작하세요. 보유·Pot·Rank·사이클손익이 0으로 초기화되고, 누적손익(전체 수익)은 그대로 유지돼요.
+      </div>
+      <button class="btn-new" style="background:#1a3a5a;color:#6bb5ff;border:1px solid #2a4a6a" onclick="startNewCycle()">+ 새 사이클 시작</button>
+    </div>
+
     <div class="sec">위험 구역</div>
     <button class="btn-danger" onclick="deleteTicker()">이 종목 삭제</button>
 
@@ -372,7 +380,7 @@ function renderTickerList(){
   el.innerHTML='';
   ids.forEach(id=>{
     const t=db.tickers[id];
-    const tp=calcTotal(id,'ud')+calcTotal(id,'dd');
+    const tp=calcTotal(id,'ud')+calcTotal(id,'dd')+(t.carryover||0);
     const card=document.createElement('div');
     card.className='ticker-card';
     card.onclick=()=>openTicker(id);
@@ -409,6 +417,28 @@ function deleteTicker(){
   goHome();
 }
 
+function startNewCycle(){
+  const t=cur();if(!t)return;
+  // 현재 보유 확인
+  let udHeld=0;(t.ud||[]).forEach(x=>{udHeld+=x.type==='매수'?x.qty:-x.qty;});
+  let ddHeld=0;(t.dd||[]).forEach(x=>{ddHeld+=x.type==='매수'?x.qty:-x.qty;});
+  if(udHeld>0||ddHeld>0){
+    if(!confirm(`아직 보유분이 남아있어요.\n업다운 ${udHeld}주, 떨법 ${ddHeld}주\n\n그래도 새 사이클을 시작할까요?\n(남은 보유분 기록은 정리됩니다)`))return;
+  } else {
+    if(!confirm('새 사이클을 시작할까요?\n현재 사이클 기록이 정리되고 0부터 다시 시작해요.'))return;
+  }
+  // 누적손익을 carryover에 보존
+  const udTotal=calcTotal(db.curId,'ud');
+  const ddTotal=calcTotal(db.curId,'dd');
+  t.carryover=(t.carryover||0)+udTotal+ddTotal;
+  // 거래기록 비우기 (새 사이클)
+  t.ud=[];t.dd=[];
+  // LP는 유지 (다음 주문 기준)
+  save();
+  renderTrades('ud');renderTrades('dd');renderSettings();buildTbl();
+  alert('새 사이클이 시작됐어요. 누적손익은 유지됩니다.');
+}
+
 // ── 매수가 테이블 ──
 function makeTable(lp,unit,div,isUd,heldPots){
   // 라오어 공식 (엑셀 분석 확정):
@@ -422,8 +452,13 @@ function makeTable(lp,unit,div,isUd,heldPots){
   const rows=[];
   let firstPrice;
   if(isUd){
-    const dropFactor=1 - 0.002*20/div*heldPots;
-    firstPrice=Math.round(lp*dropFactor*100)/100;
+    if(heldPots===0){
+      // 새 사이클 첫 매수가 = LP × 1.1 (라오어 엑셀: F8=0이면 D19*1.1)
+      firstPrice=Math.round(lp*1.1*100)/100;
+    } else {
+      const dropFactor=1 - 0.002*20/div*heldPots;
+      firstPrice=Math.round(lp*dropFactor*100)/100;
+    }
   } else {
     firstPrice=Math.round(lp*100)/100;
   }
@@ -681,7 +716,7 @@ function calcPot(id,track){
 function updateCfg(){
   const t=cur();if(!t)return;
   const unit=t.seed/Math.max(t.div,1);
-  const tp=calcTotal(db.curId,'ud')+calcTotal(db.curId,'dd');
+  const tp=calcTotal(db.curId,'ud')+calcTotal(db.curId,'dd')+(t.carryover||0);
   const udPot=calcPot(db.curId,'ud');
   document.getElementById('cfg-unit').textContent='$'+unit.toFixed(0);
   document.getElementById('cfg-pot-d').textContent=udPot+' / '+t.div;
