@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>스위치법 트래커 v3.8 (2026-06-22)</title>
+<title>스위치법 트래커 v3.9 (2026-06-22)</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
 :root {
@@ -126,7 +126,7 @@ input:focus{border-color:var(--accent)}
   <div class="hdr">
     <div class="hdr-row">
       <span class="home-title">SWITCH</span>
-      <span class="ver">v3.8</span>
+      <span class="ver">v3.9</span>
     </div>
   </div>
   <div class="pg on">
@@ -263,7 +263,7 @@ input:focus{border-color:var(--accent)}
       <div class="met"><div class="met-lbl">1회 매수금</div><div class="met-val" id="cfg-unit">—</div></div>
       <div class="met"><div class="met-lbl">업다운 Pot</div><div class="met-val" id="cfg-pot-d">—</div></div>
       <div class="met"><div class="met-lbl">투입 시드</div><div class="met-val" id="cfg-used">—</div></div>
-      <div class="met"><div class="met-lbl">전체 수익</div><div class="met-val" id="cfg-profit">—</div></div>
+      <div class="met"><div class="met-lbl">현 사이클 수익</div><div class="met-val" id="cfg-profit">—</div></div>
     </div>
     <div class="sec">사이클 관리</div>
     <div class="card">
@@ -272,6 +272,9 @@ input:focus{border-color:var(--accent)}
       </div>
       <button class="btn-new" style="background:#1a3a5a;color:#6bb5ff;border:1px solid #2a4a6a" onclick="startNewCycle()">+ 새 사이클 시작</button>
     </div>
+
+    <div class="sec">사이클 기록</div>
+    <div id="cycle-history"></div>
 
     <div class="sec">위험 구역</div>
     <button class="btn-danger" onclick="deleteTicker()">이 종목 삭제</button>
@@ -427,16 +430,31 @@ function startNewCycle(){
   } else {
     if(!confirm('새 사이클을 시작할까요?\n현재 사이클 기록이 정리되고 0부터 다시 시작해요.'))return;
   }
-  // 누적손익을 carryover에 보존
   const udTotal=calcTotal(db.curId,'ud');
   const ddTotal=calcTotal(db.curId,'dd');
+  // 사이클 기간 = 전체 거래 중 첫 날짜 ~ 마지막 날짜
+  const allTrades=[...(t.ud||[]),...(t.dd||[])];
+  let period='—';
+  if(allTrades.length){
+    const dates=allTrades.map(x=>x.date).filter(Boolean);
+    if(dates.length){ period=`${dates[0]} ~ ${dates[dates.length-1]}`; }
+  }
+  // 사이클 기록 저장
+  t.history=t.history||[];
+  if(allTrades.length){ // 거래가 있었던 사이클만 기록
+    t.history.push({
+      period,
+      ud:Math.round(udTotal*100)/100,
+      dd:Math.round(ddTotal*100)/100,
+      total:Math.round((udTotal+ddTotal)*100)/100,
+      endedAt:today()
+    });
+  }
   t.carryover=(t.carryover||0)+udTotal+ddTotal;
-  // 거래기록 비우기 (새 사이클)
   t.ud=[];t.dd=[];
-  // LP는 유지 (다음 주문 기준)
   save();
   renderTrades('ud');renderTrades('dd');renderSettings();buildTbl();
-  alert('새 사이클이 시작됐어요. 누적손익은 유지됩니다.');
+  alert('새 사이클이 시작됐어요. 이전 사이클 손익은 [사이클 기록]에 저장됩니다.');
 }
 
 // ── 매수가 테이블 ──
@@ -700,6 +718,58 @@ function renderSettings(){
   document.getElementById('cfg-seed').value=t.seed;
   document.getElementById('cfg-div').value=t.div;
   updateCfg();
+  renderCycleHistory();
+}
+function renderCycleHistory(){
+  const t=cur();if(!t)return;
+  const el=document.getElementById('cycle-history');
+  if(!el)return;
+  const hist=t.history||[];
+  // 현재 진행 중인 사이클
+  const curUd=calcTotal(db.curId,'ud');
+  const curDd=calcTotal(db.curId,'dd');
+  const curTotal=curUd+curDd;
+  const allTrades=[...(t.ud||[]),...(t.dd||[])];
+  let curPeriod='거래 없음';
+  if(allTrades.length){
+    const dates=allTrades.map(x=>x.date).filter(Boolean);
+    if(dates.length)curPeriod=`${dates[0]} ~ 진행 중`;
+  }
+  let html='';
+  // 진행 중 사이클 카드
+  html+=`<div class="card" style="border-color:var(--accent);margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <span style="font-size:12px;font-weight:700;color:var(--accent)">진행 중 (사이클 ${hist.length+1})</span>
+      <span style="font-family:var(--mono);font-size:15px;font-weight:500;color:${curTotal>=0?'var(--accent)':'var(--accent2)'}">${curTotal>=0?'+':'-'}$${Math.abs(curTotal).toFixed(2)}</span>
+    </div>
+    <div style="font-size:11px;color:var(--text2)">${curPeriod}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:4px;font-family:var(--mono)">업다운 ${curUd>=0?'+':'-'}$${Math.abs(curUd).toFixed(2)} · 떨법 ${curDd>=0?'+':'-'}$${Math.abs(curDd).toFixed(2)}</div>
+  </div>`;
+  // 지난 사이클들 (최신순)
+  if(hist.length){
+    [...hist].reverse().forEach((h,idx)=>{
+      const n=hist.length-idx;
+      html+=`<div class="card" style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:12px;font-weight:700;color:var(--text2)">사이클 ${n}</span>
+          <span style="font-family:var(--mono);font-size:15px;font-weight:500;color:${h.total>=0?'var(--accent)':'var(--accent2)'}">${h.total>=0?'+':'-'}$${Math.abs(h.total).toFixed(2)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text2)">${h.period}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px;font-family:var(--mono)">업다운 ${h.ud>=0?'+':'-'}$${Math.abs(h.ud).toFixed(2)} · 떨법 ${h.dd>=0?'+':'-'}$${Math.abs(h.dd).toFixed(2)}</div>
+      </div>`;
+    });
+    // 전체 합계
+    const grand=(t.carryover||0)+curTotal;
+    html+=`<div class="card" style="background:var(--bg3);margin-top:4px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:12px;font-weight:700">전체 누적</span>
+        <span style="font-family:var(--mono);font-size:16px;font-weight:500;color:${grand>=0?'var(--accent)':'var(--accent2)'}">${grand>=0?'+':'-'}$${Math.abs(grand).toFixed(2)}</span>
+      </div>
+    </div>`;
+  } else {
+    html+=`<div style="font-size:11px;color:var(--text3);text-align:center;padding:8px">아직 완료된 사이클이 없어요.<br>전량 매도 후 "새 사이클 시작"을 누르면 여기에 기록돼요.</div>`;
+  }
+  el.innerHTML=html;
 }
 function saveCfg(){
   const t=cur();if(!t)return;
@@ -716,7 +786,7 @@ function calcPot(id,track){
 function updateCfg(){
   const t=cur();if(!t)return;
   const unit=t.seed/Math.max(t.div,1);
-  const tp=calcTotal(db.curId,'ud')+calcTotal(db.curId,'dd')+(t.carryover||0);
+  const tp=calcTotal(db.curId,'ud')+calcTotal(db.curId,'dd');
   const udPot=calcPot(db.curId,'ud');
   document.getElementById('cfg-unit').textContent='$'+unit.toFixed(0);
   document.getElementById('cfg-pot-d').textContent=udPot+' / '+t.div;
