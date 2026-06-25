@@ -256,13 +256,18 @@ input:focus{border-color:var(--accent)}
         <div><span class="lbl">전체 분할 수</span><input type="number" id="cfg-div" oninput="saveCfg()"></div>
       </div>
       <div style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.6">
-        ※ Pot은 거래기록의 매수 횟수로 자동 계산돼요. 따로 입력할 필요 없어요.
+        ※ Pot/Rank는 거래기록의 매수 횟수로 자동 계산돼요. 전체 분할 수는 업다운법·떨법이 함께 쓰는 시드 전체의 칸 수예요.
       </div>
     </div>
     <div class="mets">
       <div class="met"><div class="met-lbl">1회 매수금</div><div class="met-val" id="cfg-unit">—</div></div>
-      <div class="met"><div class="met-lbl">업다운 Pot</div><div class="met-val" id="cfg-pot-d">—</div></div>
+      <div class="met"><div class="met-lbl">보유 주식 수</div><div class="met-val" id="cfg-shares">—</div></div>
+    </div>
+    <div class="mets">
+      <div class="met"><div class="met-lbl">전체 사용 (P+R)</div><div class="met-val" id="cfg-pr-d">—</div></div>
       <div class="met"><div class="met-lbl">투입 시드</div><div class="met-val" id="cfg-used">—</div></div>
+    </div>
+    <div class="mets">
       <div class="met"><div class="met-lbl">현 사이클 수익</div><div class="met-val" id="cfg-profit">—</div></div>
     </div>
     <div class="sec">사이클 관리</div>
@@ -787,10 +792,43 @@ function updateCfg(){
   const t=cur();if(!t)return;
   const unit=t.seed/Math.max(t.div,1);
   const tp=calcTotal(db.curId,'ud')+calcTotal(db.curId,'dd');
-  const udPot=calcPot(db.curId,'ud');
+
+  // 업다운법: 보유주식·Pot
+  let udHeld=0,udPot=0;
+  (t.ud||[]).forEach(x=>{
+    if(x.type==='매수'){udHeld+=x.qty;udPot++;}
+    else{udHeld=Math.max(0,udHeld-x.qty);udPot=Math.max(0,udPot-1);if(udHeld<=0)udPot=0;}
+  });
+
+  // 떨법: 보유주식·Rank(매수가 종류 수, 매수매도표와 동일 로직)
+  let ddHeld=0;
+  const ddHoldByPrice={};
+  (t.dd||[]).forEach(x=>{
+    if(x.type==='매수'){
+      ddHeld+=x.qty;
+      const key=x.price.toFixed(2);
+      ddHoldByPrice[key]=(ddHoldByPrice[key]||0)+x.qty;
+    } else {
+      let rem=x.qty;
+      const keys=Object.keys(ddHoldByPrice).map(parseFloat).sort((a,b)=>a-b);
+      for(const p of keys){
+        if(rem<=0)break;
+        const k=p.toFixed(2);
+        const m=Math.min(ddHoldByPrice[k],rem);
+        ddHoldByPrice[k]-=m; rem-=m; ddHeld-=m;
+        if(ddHoldByPrice[k]<=0)delete ddHoldByPrice[k];
+      }
+    }
+  });
+  const ddRank=Object.keys(ddHoldByPrice).length;
+
+  const totalShares=udHeld+ddHeld;   // 주식 총 갯수 (업다운+떨법 합산 보유)
+  const PR=udPot+ddRank;             // 시드 전체 15칸 중 실제 사용 칸 수
+
   document.getElementById('cfg-unit').textContent='$'+unit.toFixed(0);
-  document.getElementById('cfg-pot-d').textContent=udPot+' / '+t.div;
-  document.getElementById('cfg-used').textContent='$'+(udPot*unit).toFixed(0);
+  document.getElementById('cfg-shares').textContent=totalShares+'주';
+  document.getElementById('cfg-pr-d').textContent=PR+' / '+t.div;
+  document.getElementById('cfg-used').textContent='$'+(PR*unit).toFixed(0);
   const pe=document.getElementById('cfg-profit');
   pe.textContent=(tp>=0?'+':'-')+'$'+Math.abs(tp).toFixed(2);
   pe.className='met-val '+(tp>=0?'pos':'neg');
